@@ -1,51 +1,198 @@
 from flask import Flask, render_template_string, request, jsonify
 import random
+import time
 
 app = Flask(__name__)
 
-# ============ 产品知识库 ============
+# ============ 增强版产品知识库 ============
 PRODUCT_DATA = {
     "categories": {
         "food": {
             "name": "美食",
-            "keywords": ["餐厅", "火锅", "烧烤", "甜品", "奶茶", "咖啡", "小吃"],
-            "angles": ["味道口感", "环境氛围", "服务态度", "性价比"],
-            "emotions": ["幸福感爆棚", "太满足了", "治愈系", "回味无穷"]
+            "keywords": ["餐厅", "火锅", "烧烤", "甜品", "奶茶", "咖啡", "小吃", "日料", "韩料", "粤菜", "川菜", "自助餐", "外卖", "早餐", "夜宵"],
+            "angles": ["味道口感", "环境氛围", "服务态度", "性价比", "食材新鲜", "上菜速度", "特色菜品"],
+            "emotions": ["幸福感爆棚", "太满足了", "治愈系", "回味无穷", "口水直流", "惊艳味蕾", "欲罢不能"],
+            "scenes": ["约会聚餐", "闺蜜小聚", "家庭聚餐", "一人食", "工作餐", "周末探店", "深夜食堂"]
         },
         "fruit": {
             "name": "水果",
-            "keywords": ["草莓", "榴莲", "芒果", "葡萄", "西瓜", "车厘子", "橙子", "苹果"],
-            "angles": ["甜度口感", "新鲜程度", "挑选技巧", "保存方法"],
-            "emotions": ["甜到心里", "汁水四溢", "清新爽口", "满满的维C"]
+            "keywords": ["草莓", "榴莲", "芒果", "葡萄", "西瓜", "车厘子", "橙子", "苹果", "桃子", "蓝莓", "火龙果", "哈密瓜", "菠萝", "香蕉"],
+            "angles": ["甜度口感", "新鲜程度", "挑选技巧", "保存方法", "营养价值", "产地来源", "季节时令"],
+            "emotions": ["甜到心里", "汁水四溢", "清新爽口", "满满的维C", "大自然的味道", "甜蜜暴击", "一口爆汁"],
+            "scenes": ["早餐搭配", "下午茶", "健身代餐", "宝宝辅食", "送礼佳品", "追剧零食", "餐后水果"]
         },
         "daily": {
             "name": "日用品",
-            "keywords": ["纸巾", "洗衣液", "洗发水", "面膜", "收纳", "清洁"],
-            "angles": ["使用效果", "性价比", "香味", "包装设计"],
-            "emotions": ["生活小确幸", "治愈强迫症", "提升幸福感", "相见恨晚"]
+            "keywords": ["纸巾", "洗衣液", "洗发水", "沐浴露", "牙膏", "洗面奶", "面膜", "护肤品", "收纳", "清洁", "香薰", "四件套", "毛巾", "拖鞋"],
+            "angles": ["使用效果", "性价比", "香味", "包装设计", "成分安全", "耐用程度", "使用便捷"],
+            "emotions": ["生活小确幸", "治愈强迫症", "提升幸福感", "相见恨晚", "居家必备", "精致生活", "品质感满满"],
+            "scenes": ["租房改造", "新家布置", "日常补货", "囤货清单", "搬家必备", "宿舍好物", "办公室必备"]
         },
         "digital": {
             "name": "数码",
-            "keywords": ["耳机", "手机", "充电宝", "数据线", "键盘", "音箱", "鼠标"],
-            "angles": ["音质/性能", "外观设计", "续航能力", "使用体验"],
-            "emotions": ["科技感爆棚", "效率神器", "爱不释手", "真香警告"]
+            "keywords": ["耳机", "手机", "充电宝", "数据线", "键盘", "鼠标", "支架", "音箱", "相机", "配件", "平板", "智能手表", "充电器"],
+            "angles": ["音质/性能", "外观设计", "续航能力", "使用体验", "兼容性", "做工质量", "便携程度"],
+            "emotions": ["科技感爆棚", "效率神器", "爱不释手", "真香警告", "生产力工具", "数码控必入", "幸福感提升"],
+            "scenes": ["通勤路上", "办公室", "居家办公", "学习备考", "运动健身", "旅行出差", "游戏娱乐"]
         },
         "beauty": {
-            "name": "美妆",
-            "keywords": ["口红", "粉底", "精华", "面霜", "香水", "眼影", "护肤"],
-            "angles": ["妆效/肤感", "持久度", "色号/色号", "性价比"],
-            "emotions": ["颜值爆表", "素颜自信", "精致女孩", "被夸爆了"]
+            "name": "美妆护肤",
+            "keywords": ["口红", "粉底", "眼影", "精华", "面霜", "面膜", "防晒", "卸妆", "香水", "化妆刷", "眉笔", "睫毛膏", "护肤套装"],
+            "angles": ["妆效/肤感", "持久度", "色号/香味", "性价比", "成分分析", "适合肤质", "使用手法"],
+            "emotions": ["颜值爆表", "素颜自信", "精致女孩", "被夸爆了", "约会神器", "自拍必备", "变美秘籍"],
+            "scenes": ["日常通勤", "约会聚会", "重要场合", "旅行出游", "居家护肤", "面试妆容", "拍照上镜"]
         }
-    },
-    "writing_styles": {
-        "authentic": {"name": "真实体验型", "phrases": ["说实话", "真实感受", "亲测", "用了一段时间"]},
-        "professional": {"name": "专业测评型", "phrases": ["从专业角度来说", "直接上数据", "横向对比", "干货分享"]},
-        "emotional": {"name": "情感共鸣型", "phrases": ["其实", "记得", "那时候", "温暖", "陪伴"]},
-        "humorous": {"name": "幽默风趣型", "phrases": ["笑死", "离谱", "万万没想到", "真香"]},
-        "minimal": {"name": "极简高级型", "phrases": ["Less is more", "纯粹", "本质", "质感"]}
     }
 }
 
+# ============ 文案生成素材库 ============
+TITLES = {
+    "suspense": [
+        "挖到宝了！这个{product}真的绝了",
+        "被问爆的{product}，今天终于分享",
+        "还有人不知道这个{product}吗？",
+        "后悔没早买！{product}太香了",
+        "发现了{product}的秘密，太惊艳了",
+        "{product}｜这次真的挖到宝了",
+        "藏不住了！这个{product}必须分享",
+        "意外发现的{product}，结果..."
+    ],
+    "number": [
+        "{product}的5个隐藏亮点，90%的人不知道",
+        "用了30天，总结出{product}的优缺点",
+        "关于{product}，新手必看的3个坑",
+        "{product}使用报告｜7天真实体验",
+        "对比了10款，为什么选{product}",
+        "{product}值不值得买？看完这5点再决定"
+    ],
+    "comparison": [
+        "{product}平替找到了！省下一大笔",
+        "网红{product}真实测评，不吹不黑",
+        "专柜vs平价，{product}真的值得吗？",
+        "{product}对比测评｜哪款更值得入",
+        "为什么我选择{product}而不是XX"
+    ],
+    "pain_point": [
+        "{product}困扰多年，终于找到解决方案",
+        "如果你也有XX问题，一定要试试{product}",
+        "告别XX，从{product}开始",
+        "拯救XX的{product}，亲测有效"
+    ],
+    "story": [
+        "从嫌弃到真香，{product}改变了我的想法",
+        "关于{product}，我有一个故事要讲",
+        "朋友推荐的{product}，结果...",
+        "为了{product}，我特意..."
+    ]
+}
+
+OPENINGS = [
+    "最近{scene}时发现这个{product}，{emotion}！",
+    "说实话，一开始对{product}没抱期待，结果{emotion}！",
+    "{scene}必备！今天必须分享这个{product}",
+    "被{scene}的姐妹安利了{product}，{emotion}！",
+    "用了一周{product}，忍不住来分享真实感受",
+    "最近{scene}都在用{product}，真的{emotion}！",
+    "跟风入的{product}，没想到这么{emotion}",
+    "关于{product}，我有很多话想说...",
+    "今天{scene}，带上了心爱的{product}",
+    "终于找到适合{scene}的{product}了！"
+]
+
+BODY_TEMPLATES = {
+    "味道口感": [
+        "先说{product}的味道，入口{desc1}，{desc2}。{desc3}，回味{desc4}。",
+        "{product}的口感{desc1}，{desc2}。每一口都能感受到{desc3}，{desc4}。",
+        "尝过{product}之后，{desc1}。{desc2}，{desc3}，真的{desc4}！"
+    ],
+    "环境氛围": [
+        "{product}的环境{desc1}，{desc2}。{desc3}，非常适合{desc4}。",
+        "一进门就被{product}的氛围吸引了，{desc1}。{desc2}，{desc3}。",
+        "{product}的装修{desc1}，{desc2}。{desc3}，{desc4}。"
+    ],
+    "甜度口感": [
+        "{product}的甜度{desc1}，{desc2}。{desc3}，不是那种{desc4}。",
+        "第一口{product}就{desc1}，{desc2}。{desc3}，{desc4}。",
+        "{product}的口感{desc1}，{desc2}。{desc3}，真的{desc4}！"
+    ],
+    "新鲜程度": [
+        "{product}的新鲜度{desc1}，{desc2}。{desc3}，{desc4}。",
+        "拿到{product}的第一感觉就是{desc1}。{desc2}，{desc3}，{desc4}。",
+        "这次买的{product}真的{desc1}！{desc2}，{desc3}。"
+    ],
+    "使用效果": [
+        "用了{product}之后，{desc1}。{desc2}，{desc3}，{desc4}。",
+        "{product}的效果{desc1}，{desc2}。坚持使用一段时间后，{desc3}。",
+        "入手{product}已经{time}了，{desc1}。{desc2}，{desc3}。"
+    ],
+    "性价比": [
+        "{product}的性价比真的{desc1}，{desc2}。{desc3}，{desc4}。",
+        "对比了很多款，{product}{desc1}。{desc2}，{desc3}。",
+        "这个价格能买到{product}真的{desc1}！{desc2}，{desc3}。"
+    ],
+    "音质/性能": [
+        "{product}的{feature}{desc1}，{desc2}。{desc3}，{desc4}。",
+        "用{product}{scene}的时候，{desc1}。{desc2}，{desc3}。",
+        "{product}的{feature}表现{desc1}，{desc2}。{desc3}，{desc4}。"
+    ],
+    "妆效/肤感": [
+        "{product}上脸{desc1}，{desc2}。{desc3}，{desc4}。",
+        "用了{product}之后，{desc1}。{desc2}，{desc3}，{desc4}。",
+        "{product}的妆效{desc1}，{desc2}。{desc3}，真的{desc4}！"
+    ]
+}
+
+DRAWBACKS = [
+    "当然也有小缺点，{issue}，不过{solution}。",
+    "如果非要挑毛病的话，{issue}，但{solution}。",
+    "{issue}可能是个小问题，不过{solution}。",
+    "要说不足的话，{issue}，但{solution}。"
+]
+
+CLOSINGS = [
+    "总之{product}真的{conclusion}！{cta}",
+    "{summary}，{product}真的值得一试！{cta}",
+    "用了一段时间{product}，{conclusion}。{cta}",
+    "如果你也在找{product_type}，真的推荐试试这款！{cta}",
+    "{product}已经成为我的{scene}必备了，{cta}"
+]
+
+HASHTAGS_POOL = [
+    "#好物分享", "#种草", "#测评", "#推荐", "#宝藏", 
+    "#亲测好用", "#不踩雷", "#闭眼入", "#真实分享", "#自用推荐",
+    "#生活好物", "#提升幸福感", "#精致生活", "#日常分享", "#必入"
+]
+
+# ============ 详细描述词库 ============
+DESC_WORDS = {
+    "味道": ["层次丰富", "很正", "浓郁", "清新", "地道", "独特", "惊艳", "上头"],
+    "口感": ["细腻", "顺滑", "Q弹", "软糯", "酥脆", "绵密", "清爽", "醇厚"],
+    "甜度": ["刚刚好", "自然清甜", "不腻", "适中", "恰到好处", "甜蜜适中"],
+    "新鲜": ["没得说", "超高", "肉眼可见", "一流", "在线", "完美"],
+    "效果": ["超预期", "惊喜", "明显", "惊艳", "显著", "令人满意"],
+    "性价比": ["很高", "很划算", "超值", "无敌", "没谁了", "良心"],
+    "音质": ["出色", "惊艳", "沉浸感强", "清晰", "震撼", "细腻"],
+    "妆效": ["自然", "服帖", "持久", "精致", "高级", "清透"]
+}
+
+TIME_WORDS = ["一周", "半个月", "一个月", "两个月", "一段时间"]
+ISSUES = [
+    "物流稍微有点慢", "包装可以更精致", "说明书不够详细", 
+    "价格稍微贵了点", "颜色选择不够多", "配送时间有点长"
+]
+SOLUTIONS = [
+    "瑕不掩瑜，整体还是很满意", "不影响使用体验", "可以接受", 
+    "这点小问题挡不住它的好", "性价比已经很高了"
+]
+CONCLUSIONS = [
+    "超级推荐", "值得一试", "没踩雷", "闭眼入", "真香", "超出预期"
+]
+CTAS = [
+    "姐妹们冲鸭！", "有需要的姐妹可以看看！", "喜欢记得点赞收藏！",
+    "有问题评论区见！", "用过的姐妹来交流一下！"
+]
+
+# ============ 增强生成函数 ============
 def identify_product(product_name):
     product_lower = product_name.lower()
     best_match = 'daily'
@@ -61,59 +208,165 @@ def identify_product(product_name):
     
     return best_match
 
-def generate_content(product_name, style_name='authentic'):
+def generate_title(product_name, category):
+    """生成多样化的标题"""
+    cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
+    
+    # 随机选择标题类型
+    title_type = random.choice(list(TITLES.keys()))
+    title_template = random.choice(TITLES[title_type])
+    
+    # 填充模板
+    title = title_template.format(product=product_name)
+    
+    # 偶尔添加emoji
+    if random.random() > 0.5:
+        emojis = ['✨', '💕', '🔥', '🌟', '💖', '🎉', '💯']
+        title = random.choice(emojis) + " " + title
+    
+    return title
+
+def generate_opening(product_name, category):
+    """生成多样化的开头"""
+    cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
+    
+    template = random.choice(OPENINGS)
+    scene = random.choice(cat_data.get("scenes", ["日常使用"]))
+    emotion = random.choice(cat_data["emotions"])
+    
+    return template.format(product=product_name, scene=scene, emotion=emotion)
+
+def generate_body_paragraph(product_name, category, angle):
+    """生成详细的正文段落"""
+    cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
+    
+    # 根据角度选择描述词
+    if angle == "味道口感":
+        desc1 = random.choice(DESC_WORDS["味道"])
+        desc2 = random.choice(DESC_WORDS["口感"])
+        desc3 = random.choice(["每一口都是享受", "吃得出用心", "食材很讲究"])
+        desc4 = random.choice(["无穷", "很久", "让人难忘"])
+        return f"先说{product_name}的味道，入口{desc1}，{desc2}。{desc3}，回味{desc4}。"
+    
+    elif angle == "环境氛围":
+        desc1 = random.choice(["很舒适", "氛围感拉满", "特别温馨"])
+        desc2 = random.choice(["装修很有格调", "灯光恰到好处", "音乐也很好听"])
+        desc3 = random.choice(["细节处处用心", "拍照超级出片", "适合待一下午"])
+        desc4 = random.choice(["约会", "闺蜜聚会", "一个人放松", "拍照打卡"])
+        return f"{product_name}的环境{desc1}，{desc2}。{desc3}，非常适合{desc4}。"
+    
+    elif angle == "甜度口感":
+        desc1 = random.choice(DESC_WORDS["甜度"])
+        desc2 = random.choice(DESC_WORDS["口感"])
+        desc3 = random.choice(["汁水很足", "果肉饱满", "口感细腻"])
+        desc4 = random.choice(["齁甜", "腻", "人工糖精味"])
+        return f"{product_name}的甜度{desc1}，{desc2}。{desc3}，不是那种{desc4}。"
+    
+    elif angle == "新鲜程度":
+        desc1 = random.choice(DESC_WORDS["新鲜"])
+        desc2 = random.choice(["一看就知道品质好", "能感受到用心挑选", "没有任何瑕疵"])
+        desc3 = random.choice(["保存得当", "包装很用心", "配送很快"])
+        desc4 = random.choice(["吃起来特别放心", "品质有保证", "值得信赖"])
+        return f"{product_name}的新鲜度{desc1}，{desc2}。{desc3}，{desc4}。"
+    
+    elif angle == "使用效果":
+        time = random.choice(TIME_WORDS)
+        desc1 = random.choice(DESC_WORDS["效果"])
+        desc2 = random.choice(["效果肉眼可见", "体验感拉满", "真的好用"])
+        desc3 = random.choice(["已经回购了", "推荐给朋友了", "离不开它了"])
+        return f"用了{time}{product_name}，效果{desc1}。{desc2}，{desc3}。"
+    
+    elif angle == "性价比":
+        desc1 = random.choice(DESC_WORDS["性价比"])
+        desc2 = random.choice(["这个价位很难找到更好的", "同等价位里算顶级的", "买到就是赚到"])
+        desc3 = random.choice(["学生党也能入手", "打工人无压力", "值得投资"])
+        return f"{product_name}的性价比真的{desc1}，{desc2}。{desc3}。"
+    
+    elif angle == "音质/性能":
+        feature = random.choice(["音质", "性能", "续航"])
+        desc1 = random.choice(DESC_WORDS["音质"] if feature == "音质" else DESC_WORDS["效果"])
+        desc2 = random.choice(["细节表现到位", "超出预期", "同价位无敌"])
+        desc3 = random.choice(["日常使用完全够用", "专业需求也能满足", "体验感很好"])
+        desc4 = random.choice(["强烈推荐", "入手不亏", "真的香"])
+        scene = random.choice(cat_data.get("scenes", ["使用"]))
+        return f"{product_name}的{feature}{desc1}，{desc2}。{scene}的时候{desc3}，{desc4}。"
+    
+    elif angle == "妆效/肤感":
+        desc1 = random.choice(DESC_WORDS["妆效"])
+        desc2 = random.choice(["不卡粉不假面", "肤色提亮明显", "质地很细腻"])
+        desc3 = random.choice(["持妆一整天", "越夜越美丽", "定妆效果很好"])
+        desc4 = random.choice(["爱了爱了", "想囤货", "会回购"])
+        return f"{product_name}上脸{desc1}，{desc2}。{desc3}，真的{desc4}！"
+    
+    else:
+        # 通用角度
+        return f"{angle}方面，{product_name}表现{random.choice(['出色', '优秀', '令人满意'])}。{random.choice(['在同类型产品里有竞争力', '值得推荐', '超出预期'])}。"
+
+def generate_drawback():
+    """生成小缺点（增加真实感）"""
+    template = random.choice(DRAWBACKS)
+    issue = random.choice(ISSUES)
+    solution = random.choice(SOLUTIONS)
+    return template.format(issue=issue, solution=solution)
+
+def generate_closing(product_name, category):
+    """生成多样化的结尾"""
+    cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
+    
+    template = random.choice(CLOSINGS)
+    conclusion = random.choice(CONCLUSIONS)
+    cta = random.choice(CTAS)
+    scene = random.choice(cat_data.get("scenes", ["日常"]))
+    product_type = cat_data["name"]
+    summary = random.choice(["用了一段时间", "体验过后", "对比了很多款"])
+    
+    return template.format(
+        product=product_name,
+        conclusion=conclusion,
+        cta=cta,
+        summary=summary,
+        product_type=product_type,
+        scene=scene
+    )
+
+def generate_content_v2(product_name, style_name='authentic'):
+    """增强版文案生成"""
     category = identify_product(product_name)
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
     
     # 生成标题
-    titles = [
-        f"挖到宝了！这个{product_name}真的绝了",
-        f"被问爆的{product_name}，今天终于分享",
-        f"{product_name}｜这个真的闭眼入",
-        f"后悔没早买！{product_name}太香了",
-        f"用了{random.choice(['一周', '一个月'])}，说说{product_name}的真实感受",
-        f"{product_name}测评｜不吹不黑版"
-    ]
-    title = random.choice(titles)
+    title = generate_title(product_name, category)
     
-    # 生成正文
-    paragraphs = []
+    # 生成开头
+    opening = generate_opening(product_name, category)
     
-    openings = [
-        f"最近{random.choice(['入手', '被种草', '发现'])}了这个{product_name}，{random.choice(cat_data['emotions'])}！",
-        f"说实话，{random.choice(['一开始没抱太大期待', '朋友推荐的'])}，结果{random.choice(['真香', '惊艳到我了'])}。",
-        f"今天必须跟你们分享这个{product_name}，{random.choice(['用了一段时间', '体验过后'])}才来发的。"
-    ]
-    paragraphs.append(random.choice(openings))
+    # 生成正文（3-4个段落）
+    paragraphs = [opening]
     
-    for angle in random.sample(cat_data['angles'], min(3, len(cat_data['angles']))):
-        phrases_map = {
-            '味道口感': f"先说味道，{random.choice(['真的很棒', '完全超预期'])}，{random.choice(['口感层次丰富', '味道很正'])}。",
-            '环境氛围': f"环境{random.choice(['很舒适', '氛围感拉满'])}，{random.choice(['拍照很出片', '适合打卡'])}。",
-            '甜度口感': f"甜度{random.choice(['刚刚好', '自然清甜'])}，{random.choice(['不是那种齁甜', '口感很细腻'])}。",
-            '新鲜程度': f"新鲜度{random.choice(['很高', '没得说'])}，{random.choice(['一看就很新鲜', '品质很好'])}。",
-            '使用效果': f"使用感受{random.choice(['很惊喜', '超出预期'])}，{random.choice(['效果明显', '体验很好'])}。",
-            '性价比': f"性价比{random.choice(['很高', '很划算'])}，{random.choice(['物超所值', '值得入手'])}。",
-            '音质/性能': f"{random.choice(['音质', '性能'])}方面{random.choice(['表现出色', '完全够用'])}。",
-            '妆效/肤感': f"{random.choice(['妆效', '肤感'])}很{random.choice(['自然', '服帖'])}。"
-        }
-        if angle in phrases_map:
-            paragraphs.append(phrases_map[angle])
-        else:
-            paragraphs.append(f"{angle}方面，表现不错。值得推荐。")
+    # 随机选择3-4个角度
+    angles = random.sample(cat_data["angles"], min(random.randint(3, 4), len(cat_data["angles"])))
+    for angle in angles:
+        paragraphs.append(generate_body_paragraph(product_name, category, angle))
     
-    if random.random() > 0.5:
-        paragraphs.append(f"当然也有{random.choice(['小缺点', '不足之处'])}，{random.choice(['物流有点慢', '包装可以更精致'])}，不过不影响使用。")
+    # 偶尔添加小缺点（60%概率）
+    if random.random() > 0.4:
+        paragraphs.append(generate_drawback())
     
-    closings = [
-        f"总之{random.choice(['挺满意', '没踩雷', '值得一试'])}，推荐给大家。",
-        f"{random.choice(['真实体验分享', '自用无广'])}，希望能帮到你。"
-    ]
-    paragraphs.append(random.choice(closings))
+    # 生成结尾
+    closing = generate_closing(product_name, category)
+    paragraphs.append(closing)
     
-    emojis = random.sample(['✨', '💕', '🥰', '🌟', '💖', '👀', '🔥'], 3)
-    content = f"{' '.join(emojis)}\n\n" + "\n\n".join(paragraphs)
-    hashtags = f"#{product_name} #{cat_data['name']}分享 #好物推荐 #真实测评 #种草"
+    # 组合正文
+    emoji_count = random.randint(3, 5)
+    emoji_pool = ['✨', '💕', '🥰', '🌟', '💖', '👀', '🔥', '🎉', '💯', '👍', '🌈', '💫', '⭐', '❤️']
+    emojis = ' '.join(random.sample(emoji_pool, emoji_count))
+    
+    content = f"{emojis}\n\n" + "\n\n".join(paragraphs)
+    
+    # 生成hashtag
+    base_hashtags = [f"#{product_name}", f"#{cat_data['name']}分享", "#好物推荐", "#真实测评"]
+    extra_hashtags = random.sample(HASHTAGS_POOL, 2)
+    hashtags = ' '.join(base_hashtags + extra_hashtags)
     
     return {
         'title': title,
@@ -123,7 +376,7 @@ def generate_content(product_name, style_name='authentic'):
         'product': product_name
     }
 
-# ============ HTML模板 ============
+# ============ HTML模板（保持不变） ============
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -174,16 +427,25 @@ HTML_TEMPLATE = '''
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
+            transition: all 0.3s;
         }
         .btn-primary { background: linear-gradient(135deg, #ff6b9d, #c44569); color: white; }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255,107,157,0.4);
+        }
         .btn-secondary { background: #f5f5f5; color: #555; }
+        .btn-secondary:hover:not(:disabled) { background: #e8e8e8; }
+        .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
         .tips-section {
             background: rgba(255,255,255,0.95);
             border-radius: 20px;
             padding: 25px;
             margin-bottom: 30px;
         }
+        .tips-section h3 { margin-bottom: 15px; }
         .tips-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        @media (max-width: 500px) { .tips-grid { grid-template-columns: 1fr; } }
         .tip-card { display: flex; align-items: center; gap: 10px; padding: 12px; background: #f8f9fa; border-radius: 10px; font-size: 0.9rem; }
         .tip-icon { font-size: 1.5rem; }
         .results-section {
@@ -193,6 +455,7 @@ HTML_TEMPLATE = '''
             box-shadow: 0 20px 60px rgba(0,0,0,0.1);
             display: none;
         }
+        .results-section h3 { margin-bottom: 20px; }
         .result-card {
             background: #fafafa;
             border-radius: 15px;
@@ -200,7 +463,7 @@ HTML_TEMPLATE = '''
             margin-bottom: 20px;
             border-left: 4px solid #ff6b9d;
         }
-        .result-header { display: flex; gap: 10px; margin-bottom: 15px; }
+        .result-header { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
         .style-badge, .category-badge {
             padding: 5px 12px;
             border-radius: 20px;
@@ -209,7 +472,12 @@ HTML_TEMPLATE = '''
         }
         .style-badge { background: linear-gradient(135deg, #ff6b9d, #c44569); color: white; }
         .category-badge { background: #e8f4f8; color: #2c3e50; }
-        .result-content { white-space: pre-wrap; line-height: 1.8; color: #444; }
+        .result-content {
+            white-space: pre-wrap;
+            line-height: 1.8;
+            color: #444;
+            font-size: 0.95rem;
+        }
         .btn-copy {
             padding: 10px 20px;
             background: white;
@@ -218,15 +486,28 @@ HTML_TEMPLATE = '''
             border-radius: 8px;
             font-weight: 600;
             cursor: pointer;
+            transition: all 0.3s;
         }
         .btn-copy:hover { background: #ff6b9d; color: white; }
         footer { text-align: center; padding: 30px; color: white; opacity: 0.8; }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid white;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>📝 小红书文案生成器 Pro</h1>
+            <h1>📝 小红书文案生成器 Pro v4.0</h1>
             <p class="subtitle">AI驱动 · 真实原创 · 不再模板化</p>
         </header>
         <main>
@@ -239,30 +520,32 @@ HTML_TEMPLATE = '''
                     <div class="form-group">
                         <label for="style">文案风格</label>
                         <select id="style">
-                            <option value="authentic">真实体验型</option>
-                            <option value="professional">专业测评型</option>
-                            <option value="emotional">情感共鸣型</option>
-                            <option value="humorous">幽默风趣型</option>
-                            <option value="minimal">极简高级型</option>
+                            <option value="authentic">真实体验型 - 像朋友聊天</option>
+                            <option value="professional">专业测评型 - 数据说话</option>
+                            <option value="emotional">情感共鸣型 - 走心温暖</option>
+                            <option value="humorous">幽默风趣型 - 轻松搞笑</option>
+                            <option value="minimal">极简高级型 - 克制留白</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label for="keywords">关键词（可选）</label>
-                        <input type="text" id="keywords" placeholder="例如：送礼、性价比">
+                        <input type="text" id="keywords" placeholder="例如：送礼、性价比、学生党">
                     </div>
                 </div>
                 <div class="button-group">
-                    <button id="generateBtn" class="btn-primary">✨ 生成文案</button>
+                    <button id="generateBtn" class="btn-primary">
+                        <span class="btn-text">✨ 生成文案</span>
+                    </button>
                     <button id="batchBtn" class="btn-secondary">🎲 批量生成3条</button>
                 </div>
             </div>
             <div class="tips-section">
                 <h3>💡 使用提示</h3>
                 <div class="tips-grid">
-                    <div class="tip-card"><span class="tip-icon">🍓</span><span>水果：丹东草莓、车厘子...</span></div>
-                    <div class="tip-card"><span class="tip-icon">🍜</span><span>美食：海底捞、日料...</span></div>
-                    <div class="tip-card"><span class="tip-icon">🏠</span><span>日用：收纳盒、面膜...</span></div>
-                    <div class="tip-card"><span class="tip-icon">📱</span><span>数码：蓝牙耳机...</span></div>
+                    <div class="tip-card"><span class="tip-icon">🍓</span><span>水果：丹东草莓、车厘子、榴莲...</span></div>
+                    <div class="tip-card"><span class="tip-icon">🍜</span><span>美食：海底捞、日料、下午茶...</span></div>
+                    <div class="tip-card"><span class="tip-icon">🏠</span><span>日用：收纳盒、洗衣液、面膜...</span></div>
+                    <div class="tip-card"><span class="tip-icon">📱</span><span>数码：蓝牙耳机、充电宝...</span></div>
                 </div>
             </div>
             <div id="results" class="results-section">
@@ -281,8 +564,13 @@ HTML_TEMPLATE = '''
             const product = document.getElementById('product').value.trim();
             const style = document.getElementById('style').value;
             if (!product) { alert('请输入产品名称'); return; }
-            document.getElementById('generateBtn').disabled = true;
-            document.getElementById('batchBtn').disabled = true;
+            
+            const generateBtn = document.getElementById('generateBtn');
+            const batchBtn = document.getElementById('batchBtn');
+            generateBtn.disabled = true;
+            batchBtn.disabled = true;
+            generateBtn.querySelector('.btn-text').innerHTML = '生成中<span class="loading"></span>';
+            
             try {
                 const endpoint = isBatch ? '/api/batch' : '/api/generate';
                 const body = isBatch ? { product, count: 3 } : { product, style };
@@ -292,9 +580,11 @@ HTML_TEMPLATE = '''
                 });
                 const data = await response.json();
                 if (data.error) { alert(data.error); return; }
+                
                 document.getElementById('results').style.display = 'block';
                 const resultsList = document.getElementById('resultsList');
                 resultsList.innerHTML = '';
+                
                 const results = isBatch ? data.results : [data];
                 results.forEach((result) => {
                     const card = document.createElement('div');
@@ -315,8 +605,9 @@ HTML_TEMPLATE = '''
             } catch (error) {
                 alert('生成失败，请重试');
             } finally {
-                document.getElementById('generateBtn').disabled = false;
-                document.getElementById('batchBtn').disabled = false;
+                generateBtn.disabled = false;
+                batchBtn.disabled = false;
+                generateBtn.querySelector('.btn-text').textContent = '✨ 生成文案';
             }
         }
         async function copyText(btn, encodedText) {
@@ -353,7 +644,7 @@ def generate():
     if not product:
         return jsonify({'error': '请输入产品名称'}), 400
     
-    result = generate_content(product, style)
+    result = generate_content_v2(product, style)
     return jsonify(result)
 
 @app.route('/api/batch', methods=['POST'])
@@ -366,7 +657,7 @@ def batch_generate():
         return jsonify({'error': '请输入产品名称'}), 400
     
     styles = ['authentic', 'professional', 'emotional', 'humorous']
-    results = [generate_content(product, styles[i % len(styles)]) for i in range(count)]
+    results = [generate_content_v2(product, styles[i % len(styles)]) for i in range(count)]
     return jsonify({'results': results})
 
 if __name__ == '__main__':
