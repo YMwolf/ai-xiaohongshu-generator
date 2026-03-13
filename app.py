@@ -1,95 +1,156 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, session
 import random
 import time
 import os
 import requests
 import json
+from datetime import datetime
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'xiaohongshu-pro-secret-key')
 
 # ============ Coze API 配置 ============
 COZE_BOT_ID = os.environ.get('COZE_BOT_ID', '')
 COZE_API_TOKEN = os.environ.get('COZE_API_TOKEN', '')
 COZE_API_URL = 'https://api.coze.cn/open_api/v2/chat'
 
-def generate_with_coze_api(product_name, style_name='authentic', category=''):
-    """
-    调用Coze Bot API生成小红书文案
-    """
-    if not COZE_BOT_ID or not COZE_API_TOKEN:
-        return None
+# ============ 爆款评分系统 ============
+def calculate_score(content, title):
+    """计算文案爆款潜力分数"""
+    score = 60  # 基础分
+    factors = []
     
-    # 构建提示词
-    style_names = {
-        'authentic': '真实体验型，像朋友聊天',
-        'professional': '专业测评型，数据说话',
-        'emotional': '情感共鸣型，走心温暖',
-        'humorous': '幽默风趣型，轻松搞笑',
-        'minimal': '极简高级型，克制留白'
+    # 1. 标题长度（15-25字最佳）
+    title_len = len(title)
+    if 15 <= title_len <= 25:
+        score += 10
+        factors.append("✅ 标题长度适中")
+    elif title_len < 10:
+        score -= 5
+        factors.append("⚠️ 标题过短")
+    
+    # 2. 是否有emoji
+    emoji_count = content.count('🌟') + content.count('✨') + content.count('💕') + content.count('🔥') + content.count('💖')
+    if 3 <= emoji_count <= 6:
+        score += 8
+        factors.append("✅ emoji数量合适")
+    elif emoji_count > 8:
+        score -= 3
+        factors.append("⚠️ emoji过多")
+    
+    # 3. 是否有hashtag
+    if '#' in content:
+        hashtag_count = content.count('#')
+        if 3 <= hashtag_count <= 6:
+            score += 8
+            factors.append("✅ 标签数量合适")
+    
+    # 4. 内容长度（300-800字最佳）
+    content_len = len(content)
+    if 300 <= content_len <= 800:
+        score += 10
+        factors.append("✅ 内容长度适中")
+    elif content_len < 200:
+        score -= 10
+        factors.append("⚠️ 内容过短")
+    
+    # 5. 是否有数字（增加可信度）
+    if any(c.isdigit() for c in content):
+        score += 5
+        factors.append("✅ 包含具体数据")
+    
+    # 6. 是否有互动引导
+    interactive_words = ['评论', '点赞', '收藏', '关注', '交流', '问']
+    if any(word in content for word in interactive_words):
+        score += 7
+        factors.append("✅ 有互动引导")
+    
+    # 7. 是否有真实感受词
+    real_words = ['真的', '说实话', '亲测', '用了', '体验', '感受']
+    if any(word in content for word in real_words):
+        score += 5
+        factors.append("✅ 真实感强")
+    
+    # 8. 是否有小缺点（增加真实度）
+    drawback_words = ['缺点', '不足', '瑕疵', '问题', '但是', '不过']
+    if any(word in content for word in drawback_words):
+        score += 8
+        factors.append("✅ 有真实缺点")
+    
+    score = max(0, min(100, score))
+    
+    # 评级
+    if score >= 85:
+        level = "🔥 爆款潜力"
+        color = "#ff4757"
+    elif score >= 70:
+        level = "⭐ 优秀"
+        color = "#ffa502"
+    elif score >= 60:
+        level = "✅ 良好"
+        color = "#2ed573"
+    else:
+        level = "⚠️ 需要优化"
+        color = "#747d8c"
+    
+    return {
+        'score': score,
+        'level': level,
+        'color': color,
+        'factors': factors,
+        'suggestions': get_suggestions(score, factors)
     }
-    style_desc = style_names.get(style_name, '真实体验型')
+
+def get_suggestions(score, factors):
+    """获取优化建议"""
+    suggestions = []
     
-    prompt = f"""请为产品"{product_name}"写一篇小红书种草笔记。
+    if score < 85:
+        if "⚠️ 标题过短" in str(factors):
+            suggestions.append("标题建议15-25字，增加吸引力")
+        if "⚠️ 内容过短" in str(factors):
+            suggestions.append("内容建议300-800字，详细描述体验")
+        if "⚠️ emoji过多" in str(factors):
+            suggestions.append("emoji建议3-6个，过多会显得杂乱")
+        if not any("✅ 有真实缺点" in f for f in factors):
+            suggestions.append("添加一个小缺点，增加真实感")
+        if not any("✅ 有互动引导" in f for f in factors):
+            suggestions.append("结尾添加互动引导，如'有用过的姐妹吗？'")
+    
+    return suggestions
 
-风格：{style_desc}
-类别：{category}
+# ============ 热门标签推荐 ============
+HOT_TAGS = {
+    '通用': ['#好物分享', '#种草', '#测评', '#推荐', '#宝藏', '#亲测好用', '#不踩雷', '#闭眼入'],
+    '美食': ['#美食分享', '#探店', '#一人食', '#自制美食', '#美食测评', '#吃货日常', '#深夜食堂'],
+    '水果': ['#水果自由', '#应季水果', '#新鲜水果', '#水果推荐', '#每日水果', '#水果测评'],
+    '美妆': ['#美妆分享', '#护肤好物', '#化妆教程', '#口红试色', '#skincare', '#变美秘籍'],
+    '数码': ['#数码好物', '#科技改变生活', '#数码测评', '#EDC', '#生产力工具', '#数码控'],
+    '日用': ['#生活好物', '#居家必备', '#提升幸福感的小物', '#仪式感', '#租房好物', '#收纳整理']
+}
 
-要求：
-1. 标题吸引人，15-25字
-2. 开头有钩子，抓住注意力
-3. 正文分段，包含真实使用感受
-4. 有具体细节描述，不要说空话
-5. 适当使用emoji（3-5个）
-6. 结尾加3-5个相关hashtag
-7. 像真人博主写的，不要营销感
-8. 300-600字
-
-请直接输出完整文案："""
-
-    headers = {
-        'Authorization': f'Bearer {COZE_API_TOKEN}',
-        'Content-Type': 'application/json',
-        'Accept': '*/*',
-        'Host': 'api.coze.cn',
-        'Connection': 'keep-alive'
+def get_recommended_tags(category, product_name):
+    """获取推荐标签"""
+    tags = HOT_TAGS.get('通用', [])
+    
+    category_map = {
+        'food': '美食',
+        'fruit': '水果',
+        'beauty': '美妆',
+        'digital': '数码',
+        'daily': '日用'
     }
     
-    payload = {
-        'bot_id': COZE_BOT_ID,
-        'user': 'xiaohongshu_user',
-        'query': prompt,
-        'stream': False
-    }
+    cat_name = category_map.get(category, '')
+    if cat_name and cat_name in HOT_TAGS:
+        tags = HOT_TAGS[cat_name] + tags[:4]
     
-    try:
-        response = requests.post(
-            COZE_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            # 解析Coze返回的内容
-            if 'messages' in data and len(data['messages']) > 0:
-                # 找到assistant的回复
-                for msg in data['messages']:
-                    if msg.get('role') == 'assistant' and msg.get('type') == 'answer':
-                        return msg.get('content', '')
-            # 如果没有找到标准格式，返回第一个消息
-            if 'messages' in data and len(data['messages']) > 0:
-                return data['messages'][0].get('content', '')
-        else:
-            print(f"Coze API错误: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"Coze API调用失败: {e}")
-        return None
+    # 添加产品相关标签
+    tags.append(f"#{product_name}")
     
-    return None
+    return tags[:8]  # 返回前8个标签
 
+# [保留原有的 PRODUCT_DATA, TITLES, OPENINGS 等代码...]
 # ============ 增强版产品知识库 ============
 PRODUCT_DATA = {
     "categories": {
@@ -131,7 +192,7 @@ PRODUCT_DATA = {
     }
 }
 
-# ============ 文案生成素材库 ============
+# [保留原有的生成函数...]
 TITLES = {
     "suspense": [
         "挖到宝了！这个{product}真的绝了",
@@ -249,7 +310,6 @@ HASHTAGS_POOL = [
     "#生活好物", "#提升幸福感", "#精致生活", "#日常分享", "#必入"
 ]
 
-# ============ 详细描述词库 ============
 DESC_WORDS = {
     "味道": ["层次丰富", "很正", "浓郁", "清新", "地道", "独特", "惊艳", "上头"],
     "口感": ["细腻", "顺滑", "Q弹", "软糯", "酥脆", "绵密", "清爽", "醇厚"],
@@ -278,7 +338,6 @@ CTAS = [
     "有问题评论区见！", "用过的姐妹来交流一下！"
 ]
 
-# ============ 增强生成函数 ============
 def identify_product(product_name):
     product_lower = product_name.lower()
     best_match = 'daily'
@@ -295,17 +354,11 @@ def identify_product(product_name):
     return best_match
 
 def generate_title(product_name, category):
-    """生成多样化的标题"""
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
-    
-    # 随机选择标题类型
     title_type = random.choice(list(TITLES.keys()))
     title_template = random.choice(TITLES[title_type])
-    
-    # 填充模板
     title = title_template.format(product=product_name)
     
-    # 偶尔添加emoji
     if random.random() > 0.5:
         emojis = ['✨', '💕', '🔥', '🌟', '💖', '🎉', '💯']
         title = random.choice(emojis) + " " + title
@@ -313,20 +366,15 @@ def generate_title(product_name, category):
     return title
 
 def generate_opening(product_name, category):
-    """生成多样化的开头"""
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
-    
     template = random.choice(OPENINGS)
     scene = random.choice(cat_data.get("scenes", ["日常使用"]))
     emotion = random.choice(cat_data["emotions"])
-    
     return template.format(product=product_name, scene=scene, emotion=emotion)
 
 def generate_body_paragraph(product_name, category, angle):
-    """生成详细的正文段落"""
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
     
-    # 根据角度选择描述词
     if angle == "味道口感":
         desc1 = random.choice(DESC_WORDS["味道"])
         desc2 = random.choice(DESC_WORDS["口感"])
@@ -385,27 +433,22 @@ def generate_body_paragraph(product_name, category, angle):
         return f"{product_name}上脸{desc1}，{desc2}。{desc3}，真的{desc4}！"
     
     else:
-        # 通用角度
         return f"{angle}方面，{product_name}表现{random.choice(['出色', '优秀', '令人满意'])}。{random.choice(['在同类型产品里有竞争力', '值得推荐', '超出预期'])}。"
 
 def generate_drawback():
-    """生成小缺点（增加真实感）"""
     template = random.choice(DRAWBACKS)
     issue = random.choice(ISSUES)
     solution = random.choice(SOLUTIONS)
     return template.format(issue=issue, solution=solution)
 
 def generate_closing(product_name, category):
-    """生成多样化的结尾"""
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
-    
     template = random.choice(CLOSINGS)
     conclusion = random.choice(CONCLUSIONS)
     cta = random.choice(CTAS)
     scene = random.choice(cat_data.get("scenes", ["日常"]))
     product_type = cat_data["name"]
     summary = random.choice(["用了一段时间", "体验过后", "对比了很多款"])
-    
     return template.format(
         product=product_name,
         conclusion=conclusion,
@@ -416,34 +459,10 @@ def generate_closing(product_name, category):
     )
 
 def generate_content_v2(product_name, style_name='authentic'):
-    """增强版文案生成 - 优先调用Coze API，失败时回退到本地"""
+    """增强版文案生成"""
     category = identify_product(product_name)
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
     
-    # 首先尝试调用Coze API
-    coze_content = generate_with_coze_api(product_name, style_name, cat_data['name'])
-    
-    if coze_content:
-        # 解析Coze返回的内容，提取标题
-        lines = coze_content.split('\n')
-        title = product_name
-        for line in lines[:5]:
-            line = line.strip()
-            if line and not line.startswith('#') and len(line) < 50:
-                # 移除可能的【】
-                title = line.replace('【', '').replace('】', '')
-                break
-        
-        return {
-            'title': title,
-            'content': coze_content if '【' in coze_content else f"【{title}】\n\n{coze_content}",
-            'category': category,
-            'style': style_name,
-            'product': product_name,
-            'source': 'coze_api'
-        }
-    
-    # Coze API失败，使用本地生成
     # 生成标题
     title = generate_title(product_name, category)
     
@@ -478,155 +497,450 @@ def generate_content_v2(product_name, style_name='authentic'):
     extra_hashtags = random.sample(HASHTAGS_POOL, 2)
     hashtags = ' '.join(base_hashtags + extra_hashtags)
     
+    full_content = f"【{title}】\n\n{content}\n\n{hashtags}"
+    
+    # 计算爆款评分
+    score_data = calculate_score(full_content, title)
+    
+    # 获取推荐标签
+    recommended_tags = get_recommended_tags(category, product_name)
+    
     return {
         'title': title,
-        'content': f"【{title}】\n\n{content}\n\n{hashtags}",
+        'content': full_content,
         'category': category,
         'style': style_name,
         'product': product_name,
+        'score': score_data,
+        'recommended_tags': recommended_tags,
         'source': 'local'
     }
 
-# ============ HTML模板（保持不变） ============
+# ============ HTML模板（全新升级版） ============
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>小红书文案生成器 Pro v4.0</title>
+    <title>小红书文案生成器 Pro v4.0 - 爆款文案一键生成</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
-            background: linear-gradient(135deg, #ff6b9d 0%, #c44569 50%, #f8b500 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
             min-height: 100vh;
             color: #333;
         }
-        .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
-        header { text-align: center; margin-bottom: 40px; color: white; }
-        header h1 { font-size: 2.5rem; margin-bottom: 10px; }
-        .subtitle { font-size: 1.1rem; opacity: 0.9; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        
+        /* Header */
+        header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+            color: white;
+            padding: 20px 0;
+        }
+        header h1 { 
+            font-size: 2.2rem; 
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        .subtitle { 
+            font-size: 1rem; 
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+        
+        /* Stats Bar */
+        .stats-bar {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .stat-item {
+            background: rgba(255,255,255,0.2);
+            padding: 10px 20px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .stat-number { font-weight: bold; font-size: 1.2rem; }
+        
+        /* Input Section */
         .input-section {
             background: white;
             border-radius: 20px;
             padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
         }
         .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #555; }
+        .form-group label { 
+            display: block; 
+            margin-bottom: 8px; 
+            font-weight: 600; 
+            color: #555;
+            font-size: 0.95rem;
+        }
         .form-group input, .form-group select {
             width: 100%;
-            padding: 12px 16px;
+            padding: 14px 18px;
             border: 2px solid #e8e8e8;
             border-radius: 12px;
             font-size: 1rem;
+            transition: all 0.3s;
         }
         .form-group input:focus, .form-group select:focus {
             outline: none;
-            border-color: #ff6b9d;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102,126,234,0.1);
         }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
-        .button-group { display: flex; gap: 15px; margin-top: 25px; }
+        .form-row { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px; 
+        }
+        @media (max-width: 600px) { 
+            .form-row { grid-template-columns: 1fr; } 
+            header h1 { font-size: 1.8rem; }
+        }
+        
+        /* Buttons */
+        .button-group { 
+            display: flex; 
+            gap: 15px; 
+            margin-top: 25px; 
+        }
         .btn-primary, .btn-secondary {
             flex: 1;
-            padding: 15px 30px;
+            padding: 16px 30px;
             border: none;
             border-radius: 12px;
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
-        .btn-primary { background: linear-gradient(135deg, #ff6b9d, #c44569); color: white; }
+        .btn-primary { 
+            background: linear-gradient(135deg, #667eea, #764ba2); 
+            color: white; 
+            box-shadow: 0 4px 15px rgba(102,126,234,0.4);
+        }
         .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(255,107,157,0.4);
+            box-shadow: 0 8px 25px rgba(102,126,234,0.5);
         }
-        .btn-secondary { background: #f5f5f5; color: #555; }
-        .btn-secondary:hover:not(:disabled) { background: #e8e8e8; }
-        .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-secondary { 
+            background: linear-gradient(135deg, #f093fb, #f5576c); 
+            color: white;
+            box-shadow: 0 4px 15px rgba(245,87,108,0.4);
+        }
+        .btn-secondary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(245,87,108,0.5);
+        }
+        .btn-primary:disabled, .btn-secondary:disabled { 
+            opacity: 0.6; 
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* Quick Tags */
+        .quick-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .quick-tag {
+            padding: 6px 12px;
+            background: #f0f0f0;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+        .quick-tag:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        /* Tips Section */
         .tips-section {
             background: rgba(255,255,255,0.95);
             border-radius: 20px;
             padding: 25px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
-        .tips-section h3 { margin-bottom: 15px; }
-        .tips-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .tips-section h3 { margin-bottom: 15px; color: #333; }
+        .tips-grid { 
+            display: grid; 
+            grid-template-columns: repeat(2, 1fr); 
+            gap: 12px; 
+        }
         @media (max-width: 500px) { .tips-grid { grid-template-columns: 1fr; } }
-        .tip-card { display: flex; align-items: center; gap: 10px; padding: 12px; background: #f8f9fa; border-radius: 10px; font-size: 0.9rem; }
+        .tip-card { 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+            padding: 12px; 
+            background: #f8f9fa; 
+            border-radius: 10px; 
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tip-card:hover {
+            background: #e8e8e8;
+            transform: translateX(5px);
+        }
         .tip-icon { font-size: 1.5rem; }
+        
+        /* Results Section */
         .results-section {
             background: white;
             border-radius: 20px;
             padding: 30px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
             display: none;
         }
-        .results-section h3 { margin-bottom: 20px; }
+        .results-section h3 { margin-bottom: 20px; color: #333; }
+        
+        /* Score Card */
+        .score-card {
+            background: linear-gradient(135deg, #f5f7fa, #e4e8ec);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 5px solid #667eea;
+        }
+        .score-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .score-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .score-level {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .score-factors {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        .score-factor {
+            padding: 5px 10px;
+            background: white;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
+        .score-suggestions {
+            background: #fff3cd;
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 10px;
+        }
+        .score-suggestions h4 {
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            color: #856404;
+        }
+        .score-suggestions ul {
+            margin-left: 18px;
+            font-size: 0.85rem;
+            color: #856404;
+        }
+        
+        /* Result Card */
         .result-card {
             background: #fafafa;
             border-radius: 15px;
             padding: 25px;
             margin-bottom: 20px;
-            border-left: 4px solid #ff6b9d;
+            border-left: 4px solid #667eea;
         }
-        .result-header { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .result-header { 
+            display: flex; 
+            gap: 10px; 
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
         .style-badge, .category-badge {
-            padding: 5px 12px;
+            padding: 6px 14px;
             border-radius: 20px;
             font-size: 0.8rem;
             font-weight: 600;
         }
-        .style-badge { background: linear-gradient(135deg, #ff6b9d, #c44569); color: white; }
-        .category-badge { background: #e8f4f8; color: #2c3e50; }
+        .style-badge { 
+            background: linear-gradient(135deg, #667eea, #764ba2); 
+            color: white; 
+        }
+        .category-badge { 
+            background: #e8f4f8; 
+            color: #2c3e50; 
+        }
         .result-content {
             white-space: pre-wrap;
             line-height: 1.8;
             color: #444;
             font-size: 0.95rem;
-        }
-        .btn-copy {
-            padding: 10px 20px;
             background: white;
-            border: 2px solid #ff6b9d;
-            color: #ff6b9d;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        
+        /* Recommended Tags */
+        .recommended-tags {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e8e8e8;
+        }
+        .recommended-tags h4 {
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            color: #555;
+        }
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .rec-tag {
+            padding: 5px 12px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .rec-tag:hover {
+            background: #1976d2;
+            color: white;
+        }
+        
+        /* Action Buttons */
+        .result-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn-copy, .btn-regenerate, .btn-share {
+            padding: 10px 20px;
             border-radius: 8px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
+            font-size: 0.9rem;
         }
-        .btn-copy:hover { background: #ff6b9d; color: white; }
-        footer { text-align: center; padding: 30px; color: white; opacity: 0.8; }
+        .btn-copy {
+            background: white;
+            border: 2px solid #667eea;
+            color: #667eea;
+        }
+        .btn-copy:hover {
+            background: #667eea;
+            color: white;
+        }
+        .btn-regenerate {
+            background: #f0f0f0;
+            border: none;
+            color: #555;
+        }
+        .btn-regenerate:hover {
+            background: #e0e0e0;
+        }
+        
+        /* Loading */
         .loading {
             display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid white;
-            border-top-color: transparent;
+            width: 18px;
+            height: 18px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin-left: 8px;
-            vertical-align: middle;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Footer */
+        footer { 
+            text-align: center; 
+            padding: 30px; 
+            color: white; 
+            opacity: 0.8;
+        }
+        
+        /* History Section */
+        .history-section {
+            background: rgba(255,255,255,0.95);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .history-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .history-item:hover {
+            background: #f5f5f5;
+        }
+        .history-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .history-meta {
+            font-size: 0.8rem;
+            color: #888;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>📝 小红书文案生成器 Pro v4.0</h1>
-            <p class="subtitle">AI驱动 · 真实原创 · 不再模板化</p>
+            <h1>📝 小红书文案生成器 Pro</h1>
+            <p class="subtitle">AI驱动 · 爆款评分 · 智能优化</p>
+            <div class="stats-bar">
+                <div class="stat-item"><span class="stat-number">5</span> 种风格</div>
+                <div class="stat-item"><span class="stat-number">200+</span> 产品库</div>
+                <div class="stat-item"><span class="stat-number">100%</span> 原创</div>
+            </div>
         </header>
+
         <main>
             <div class="input-section">
                 <div class="form-group">
                     <label for="product">产品名称 *</label>
                     <input type="text" id="product" placeholder="例如：丹东草莓、iPhone 15、海底捞..." required>
+                    <div class="quick-tags">
+                        <span class="quick-tag" onclick="fillProduct('榴莲')">🥭 榴莲</span>
+                        <span class="quick-tag" onclick="fillProduct('面膜')">🧖‍♀️ 面膜</span>
+                        <span class="quick-tag" onclick="fillProduct('耳机')">🎧 耳机</span>
+                        <span class="quick-tag" onclick="fillProduct('奶茶')">🧋 奶茶</span>
+                        <span class="quick-tag" onclick="fillProduct('口红')">💄 口红</span>
+                    </div>
                 </div>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label for="style">文案风格</label>
@@ -643,52 +957,82 @@ HTML_TEMPLATE = '''
                         <input type="text" id="keywords" placeholder="例如：送礼、性价比、学生党">
                     </div>
                 </div>
+
                 <div class="button-group">
                     <button id="generateBtn" class="btn-primary">
-                        <span class="btn-text">✨ 生成文案</span>
+                        <span>✨ 生成爆款文案</span>
                     </button>
-                    <button id="batchBtn" class="btn-secondary">🎲 批量生成3条</button>
+                    <button id="batchBtn" class="btn-secondary">
+                        <span>🎲 批量生成3条</span>
+                    </button>
                 </div>
             </div>
+
             <div class="tips-section">
-                <h3>💡 使用提示</h3>
+                <h3>💡 热门推荐</h3>
                 <div class="tips-grid">
-                    <div class="tip-card"><span class="tip-icon">🍓</span><span>水果：丹东草莓、车厘子、榴莲...</span></div>
-                    <div class="tip-card"><span class="tip-icon">🍜</span><span>美食：海底捞、日料、下午茶...</span></div>
-                    <div class="tip-card"><span class="tip-icon">🏠</span><span>日用：收纳盒、洗衣液、面膜...</span></div>
-                    <div class="tip-card"><span class="tip-icon">📱</span><span>数码：蓝牙耳机、充电宝...</span></div>
+                    <div class="tip-card" onclick="fillProduct('丹东草莓')">
+                        <span class="tip-icon">🍓</span>
+                        <span>丹东草莓 - 冬季爆款</span>
+                    </div>
+                    <div class="tip-card" onclick="fillProduct('海底捞')">
+                        <span class="tip-icon">🍜</span>
+                        <span>海底捞 - 聚会首选</span>
+                    </div>
+                    <div class="tip-card" onclick="fillProduct('收纳盒')">
+                        <span class="tip-icon">🏠</span>
+                        <span>收纳盒 - 居家必备</span>
+                    </div>
+                    <div class="tip-card" onclick="fillProduct('蓝牙耳机')">
+                        <span class="tip-icon">📱</span>
+                        <span>蓝牙耳机 - 数码好物</span>
+                    </div>
                 </div>
             </div>
+
             <div id="results" class="results-section">
                 <h3>🎯 生成结果</h3>
                 <div id="resultsList"></div>
             </div>
         </main>
-        <footer><p>Powered by AI · 每次生成都是原创内容</p></footer>
+
+        <footer>
+            <p>Powered by AI · 每次生成都是原创内容 · 爆款潜力智能评分</p>
+        </footer>
     </div>
+
     <script>
         const styleMap = {
             'authentic': '真实体验型', 'professional': '专业测评型',
             'emotional': '情感共鸣型', 'humorous': '幽默风趣型', 'minimal': '极简高级型'
         };
+        
+        function fillProduct(name) {
+            document.getElementById('product').value = name;
+        }
+        
         async function generateContent(isBatch = false) {
             const product = document.getElementById('product').value.trim();
             const style = document.getElementById('style').value;
+            
             if (!product) { alert('请输入产品名称'); return; }
             
             const generateBtn = document.getElementById('generateBtn');
             const batchBtn = document.getElementById('batchBtn');
             generateBtn.disabled = true;
             batchBtn.disabled = true;
-            generateBtn.querySelector('.btn-text').innerHTML = '生成中<span class="loading"></span>';
+            generateBtn.innerHTML = '<span class="loading"></span> 生成中...';
             
             try {
                 const endpoint = isBatch ? '/api/batch' : '/api/generate';
                 const body = isBatch ? { product, count: 3 } : { product, style };
+                
                 const response = await fetch(endpoint, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
+                
                 const data = await response.json();
                 if (data.error) { alert(data.error); return; }
                 
@@ -697,7 +1041,32 @@ HTML_TEMPLATE = '''
                 resultsList.innerHTML = '';
                 
                 const results = isBatch ? data.results : [data];
+                
                 results.forEach((result) => {
+                    // 评分卡片
+                    const scoreCard = document.createElement('div');
+                    scoreCard.className = 'score-card';
+                    scoreCard.innerHTML = `
+                        <div class="score-header">
+                            <div>
+                                <div style="font-size: 0.9rem; color: #666; margin-bottom: 5px;">爆款潜力评分</div>
+                                <div class="score-value" style="color: ${result.score.color};">${result.score.score}</div>
+                            </div>
+                            <div class="score-level" style="background: ${result.score.color}; color: white;">${result.score.level}</div>
+                        </div>
+                        <div class="score-factors">
+                            ${result.score.factors.map(f => `<span class="score-factor">${f}</span>`).join('')}
+                        </div>
+                        ${result.score.suggestions.length > 0 ? `
+                            <div class="score-suggestions">
+                                <h4>💡 优化建议</h4>
+                                <ul>${result.score.suggestions.map(s => `<li>${s}</li>`).join('')}</ul>
+                            </div>
+                        ` : ''}
+                    `;
+                    resultsList.appendChild(scoreCard);
+                    
+                    // 文案卡片
                     const card = document.createElement('div');
                     card.className = 'result-card';
                     card.innerHTML = `
@@ -706,31 +1075,43 @@ HTML_TEMPLATE = '''
                             <span class="category-badge">${result.category}</span>
                         </div>
                         <pre class="result-content">${result.content}</pre>
-                        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e8e8e8;">
-                            <button class="btn-copy" onclick="copyText(this, '${encodeURIComponent(result.content)}')">📋 复制文案</button>
+                        <div class="recommended-tags">
+                            <h4>🏷️ 推荐标签（点击复制）</h4>
+                            <div class="tag-list">
+                                ${result.recommended_tags.map(tag => `<span class="rec-tag" onclick="copyText(this, '${encodeURIComponent(tag)}')">${tag}</span>`).join('')}
+                            </div>
+                        </div>
+                        <div class="result-actions">
+                            <button class="btn-copy" onclick="copyText(this, '${encodeURIComponent(result.content)}')">📋 复制完整文案</button>
+                            <button class="btn-regenerate" onclick="fillProduct('${result.product}'); generateContent(false);">🔄 重新生成</button>
                         </div>
                     `;
                     resultsList.appendChild(card);
                 });
+                
                 document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+                
             } catch (error) {
                 alert('生成失败，请重试');
             } finally {
                 generateBtn.disabled = false;
                 batchBtn.disabled = false;
-                generateBtn.querySelector('.btn-text').textContent = '✨ 生成文案';
+                generateBtn.innerHTML = '<span>✨ 生成爆款文案</span>';
             }
         }
+        
         async function copyText(btn, encodedText) {
             try {
                 await navigator.clipboard.writeText(decodeURIComponent(encodedText));
+                const original = btn.textContent;
                 btn.textContent = '✅ 已复制';
-                setTimeout(() => { btn.textContent = '📋 复制文案'; }, 2000);
+                setTimeout(() => { btn.textContent = original; }, 2000);
             } catch (err) {
                 btn.textContent = '✅ 已复制';
-                setTimeout(() => { btn.textContent = '📋 复制文案'; }, 2000);
+                setTimeout(() => { btn.textContent = original; }, 2000);
             }
         }
+        
         document.getElementById('generateBtn').addEventListener('click', () => generateContent(false));
         document.getElementById('batchBtn').addEventListener('click', () => generateContent(true));
         document.getElementById('product').addEventListener('keypress', (e) => {
