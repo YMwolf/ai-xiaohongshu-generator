@@ -1,8 +1,94 @@
 from flask import Flask, render_template_string, request, jsonify
 import random
 import time
+import os
+import requests
+import json
 
 app = Flask(__name__)
+
+# ============ Coze API 配置 ============
+COZE_BOT_ID = os.environ.get('COZE_BOT_ID', '')
+COZE_API_TOKEN = os.environ.get('COZE_API_TOKEN', '')
+COZE_API_URL = 'https://api.coze.cn/open_api/v2/chat'
+
+def generate_with_coze_api(product_name, style_name='authentic', category=''):
+    """
+    调用Coze Bot API生成小红书文案
+    """
+    if not COZE_BOT_ID or not COZE_API_TOKEN:
+        return None
+    
+    # 构建提示词
+    style_names = {
+        'authentic': '真实体验型，像朋友聊天',
+        'professional': '专业测评型，数据说话',
+        'emotional': '情感共鸣型，走心温暖',
+        'humorous': '幽默风趣型，轻松搞笑',
+        'minimal': '极简高级型，克制留白'
+    }
+    style_desc = style_names.get(style_name, '真实体验型')
+    
+    prompt = f"""请为产品"{product_name}"写一篇小红书种草笔记。
+
+风格：{style_desc}
+类别：{category}
+
+要求：
+1. 标题吸引人，15-25字
+2. 开头有钩子，抓住注意力
+3. 正文分段，包含真实使用感受
+4. 有具体细节描述，不要说空话
+5. 适当使用emoji（3-5个）
+6. 结尾加3-5个相关hashtag
+7. 像真人博主写的，不要营销感
+8. 300-600字
+
+请直接输出完整文案："""
+
+    headers = {
+        'Authorization': f'Bearer {COZE_API_TOKEN}',
+        'Content-Type': 'application/json',
+        'Accept': '*/*',
+        'Host': 'api.coze.cn',
+        'Connection': 'keep-alive'
+    }
+    
+    payload = {
+        'bot_id': COZE_BOT_ID,
+        'user': 'xiaohongshu_user',
+        'query': prompt,
+        'stream': False
+    }
+    
+    try:
+        response = requests.post(
+            COZE_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            # 解析Coze返回的内容
+            if 'messages' in data and len(data['messages']) > 0:
+                # 找到assistant的回复
+                for msg in data['messages']:
+                    if msg.get('role') == 'assistant' and msg.get('type') == 'answer':
+                        return msg.get('content', '')
+            # 如果没有找到标准格式，返回第一个消息
+            if 'messages' in data and len(data['messages']) > 0:
+                return data['messages'][0].get('content', '')
+        else:
+            print(f"Coze API错误: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"Coze API调用失败: {e}")
+        return None
+    
+    return None
 
 # ============ 增强版产品知识库 ============
 PRODUCT_DATA = {
@@ -330,10 +416,34 @@ def generate_closing(product_name, category):
     )
 
 def generate_content_v2(product_name, style_name='authentic'):
-    """增强版文案生成"""
+    """增强版文案生成 - 优先调用Coze API，失败时回退到本地"""
     category = identify_product(product_name)
     cat_data = PRODUCT_DATA["categories"].get(category, PRODUCT_DATA["categories"]["daily"])
     
+    # 首先尝试调用Coze API
+    coze_content = generate_with_coze_api(product_name, style_name, cat_data['name'])
+    
+    if coze_content:
+        # 解析Coze返回的内容，提取标题
+        lines = coze_content.split('\n')
+        title = product_name
+        for line in lines[:5]:
+            line = line.strip()
+            if line and not line.startswith('#') and len(line) < 50:
+                # 移除可能的【】
+                title = line.replace('【', '').replace('】', '')
+                break
+        
+        return {
+            'title': title,
+            'content': coze_content if '【' in coze_content else f"【{title}】\n\n{coze_content}",
+            'category': category,
+            'style': style_name,
+            'product': product_name,
+            'source': 'coze_api'
+        }
+    
+    # Coze API失败，使用本地生成
     # 生成标题
     title = generate_title(product_name, category)
     
@@ -373,7 +483,8 @@ def generate_content_v2(product_name, style_name='authentic'):
         'content': f"【{title}】\n\n{content}\n\n{hashtags}",
         'category': category,
         'style': style_name,
-        'product': product_name
+        'product': product_name,
+        'source': 'local'
     }
 
 # ============ HTML模板（保持不变） ============
